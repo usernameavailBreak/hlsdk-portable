@@ -11,19 +11,22 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-name: setup java
+
+      - name: setup java
         uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: 'temurin'
           cache: gradle
-name: build apk (debug)
+
+      - name: build apk (debug)
         run: |
           cd android
           ./gradlew assembleDebug
           
-          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../app-debug.apk ;
-name: upload
+          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../app-debug.apk \;
+
+      - name: upload
         uses: actions/upload-artifact@v4
         with:
           name: android-${{ github.ref_name }}
