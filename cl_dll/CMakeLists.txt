@@ -124,6 +124,7 @@ set (CLDLL_SOURCES
 	tri.cpp
 	util.cpp
 	view.cpp
+	hud_playertrack.cpp
 	../public/safe_snprintf.c
 )
 
