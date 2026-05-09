@@ -5,6 +5,8 @@
 // $NoKeywords: $
 //=============================================================================
 
+#include "hud_playertrack.h"
+#include <string.h>
 #include <assert.h>
 #include "hud.h"
 #include "cl_util.h"
@@ -75,6 +77,7 @@ CGameStudioModelRenderer::CGameStudioModelRenderer( void )
 	// NOTE:  The animation code is somewhat broken, but gives you a sense for how
 	//  to do client side animation of the predicted player in a third person game.
 	m_bLocal = false;
+	int StudioDrawPlayer(int flags, struct entity_state_s *pplayer) override;
 }
 
 /*
@@ -963,6 +966,57 @@ r_studio_interface_t studio =
 	R_StudioDrawPlayer,
 };
 
+int CGameStudioModelRenderer::StudioDrawPlayer(int flags, struct entity_state_s *pplayer)
+{
+    // Let the base renderer do the full draw (sets up bones internally).
+    int result = CStudioModelRenderer::StudioDrawPlayer(flags, pplayer);
+
+    // Only capture during the actual render pass, not shadow/reflection passes.
+    if (!(flags & STUDIO_RENDER)) return result;
+    if (!debug_track_enable || debug_track_enable->value == 0.0f) return result;
+    if (!m_pCurrentEntity) return result;
+
+    int entIdx = m_pCurrentEntity->index;
+    if (entIdx < 1 || entIdx > MAX_TRACKED_PLAYERS) return result;
+
+    // ---- Capture head bone world position ----
+    // debug_bone_target holds the bone index (default 7 for HL player models).
+    // Bone 7 is the "head" bone in the standard HLD player skeleton.
+    // The bone transform matrix row 3 ([0][3],[1][3],[2][3]) is the world translation.
+    int boneIdx = debug_bone_target ? (int)debug_bone_target->value : 7;
+    if (boneIdx >= 0 && boneIdx < MAXSTUDIOBONES && m_pbonetransform)
+    {
+        float (*bt)[3][4] = *m_pbonetransform; // pointer to array of [bone][row][col]
+        g_trackInfo[entIdx].headPos[0] = bt[boneIdx][0][3];
+        g_trackInfo[entIdx].headPos[1] = bt[boneIdx][1][3];
+        g_trackInfo[entIdx].headPos[2] = bt[boneIdx][2][3];
+    }
+
+    // ---- Capture weapon model name ----
+    // weaponmodel is an index into the engine's model precache list.
+    if (m_pCurrentEntity->curstate.weaponmodel > 0)
+    {
+        model_t *wpnMdl = (model_t *)IEngineStudio.GetModelByIndex(
+            m_pCurrentEntity->curstate.weaponmodel);
+        if (wpnMdl && wpnMdl->name[0])
+        {
+            // Strip directory path.
+            const char *name  = wpnMdl->name;
+            const char *slash = strrchr(name, '/');
+            if (!slash) slash = strrchr(name, '\\');
+            const char *base  = slash ? slash + 1 : name;
+
+            strncpy(g_trackInfo[entIdx].weaponName, base, 63);
+            g_trackInfo[entIdx].weaponName[63] = '\0';
+
+            // Strip .mdl extension.
+            char *dot = strrchr(g_trackInfo[entIdx].weaponName, '.');
+            if (dot) *dot = '\0';
+        }
+    }
+
+    return result;
+}
 /*
 ====================
 HUD_GetStudioModelInterface
