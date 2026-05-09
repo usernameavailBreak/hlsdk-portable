@@ -1,6 +1,15 @@
 //=========================================================
 // hud_playertrack.cpp
 // CHudPlayerTrack — entity scanning, ESP drawing, CVAR setup.
+//
+// Fixes applied vs. original generated code:
+//   1. WorldToScreen: use gEngfuncs.pTriAPI->WorldToScreen() — pfnWorldToScreen
+//      does not exist in cl_enginefuncs_s in hlsdk-portable.
+//   2. pfnDrawConsoleStringLen: takes (const char*, int*, int*) — returns void,
+//      fills length and height via output pointers.
+//   3. DECLARE_MESSAGE(m_PlayerTrack, TrackerInit) removed — it is a file-scope
+//      macro that registers a network message handler; there is no server->client
+//      message here, so the line caused a cascade of parse errors.
 //=========================================================
 #include "hud.h"
 #include "cl_dll.h"
@@ -42,13 +51,19 @@ static inline float VecDist3D(const float *a, const float *b)
     return sqrtf(dx*dx + dy*dy + dz*dz);
 }
 
-// Returns true if the world point projects onto the screen.
+// Returns true if the world point projects onto the screen (i.e. in front of camera).
 // sx/sy are filled with pixel coordinates.
+//
+// FIX #1: pfnWorldToScreen does not exist in cl_enginefuncs_s in hlsdk-portable.
+// The correct function is gEngfuncs.pTriAPI->WorldToScreen(), which is part of
+// the triangleapi_t interface. It returns non-zero when the point is behind the camera.
+// Note: pTriAPI->WorldToScreen() must only be called during a rendering pass
+// (i.e. from CHudPlayerTrack::Draw, NOT from PlayerTrack_Frame / HUD_Frame).
 static bool WorldToScreen(const float *world, float &sx, float &sy)
 {
     float screen[3];
-    if (gEngfuncs.pfnWorldToScreen((float *)world, screen))
-        return false; // returns non-zero when behind the camera
+    if (gEngfuncs.pTriAPI->WorldToScreen((float *)world, screen))
+        return false; // non-zero = behind the camera
 
     sx = (1.0f + screen[0]) * 0.5f * g_scrinfo.iWidth;
     sy = (1.0f - screen[1]) * 0.5f * g_scrinfo.iHeight;
@@ -58,15 +73,21 @@ static bool WorldToScreen(const float *world, float &sx, float &sy)
 // 1-pixel-thick hollow rectangle outline drawn with four FillRGBA strips.
 static void DrawBoxOutline(int x, int y, int w, int h, int r, int g, int b, int a)
 {
-    gEngfuncs.pfnFillRGBA(x,     y,     w,   1,   r, g, b, a); // top
-    gEngfuncs.pfnFillRGBA(x,     y+h,   w+1, 1,   r, g, b, a); // bottom
-    gEngfuncs.pfnFillRGBA(x,     y,     1,   h,   r, g, b, a); // left
-    gEngfuncs.pfnFillRGBA(x+w,   y,     1,   h+1, r, g, b, a); // right
+    gEngfuncs.pfnFillRGBA(x,   y,     w,   1,   r, g, b, a); // top
+    gEngfuncs.pfnFillRGBA(x,   y+h,   w+1, 1,   r, g, b, a); // bottom
+    gEngfuncs.pfnFillRGBA(x,   y,     1,   h,   r, g, b, a); // left
+    gEngfuncs.pfnFillRGBA(x+w, y,     1,   h+1, r, g, b, a); // right
 }
 
+// FIX #2: pfnDrawConsoleStringLen signature in hlsdk-portable is:
+//   void (*pfnDrawConsoleStringLen)(const char *string, int *length, int *height);
+// It returns void and writes pixel width/height into the output pointer arguments.
+// The original generated code called it with one argument and used the return value
+// as an int, which does not match — it takes 3 args and returns nothing.
 static void DrawStringCentered(int cx, int y, const char *str, float r, float g, float b)
 {
-    int len = gEngfuncs.pfnDrawConsoleStringLen((char *)str);
+    int len = 0, height = 0;
+    gEngfuncs.pfnDrawConsoleStringLen(str, &len, &height);
     gEngfuncs.pfnDrawSetTextColor(r, g, b);
     gEngfuncs.pfnDrawConsoleString(cx - len / 2, y, (char *)str);
 }
@@ -86,19 +107,15 @@ int PlayerTrack_FindNearest()
     for (int i = 1; i <= maxCl && i <= MAX_TRACKED_PLAYERS; i++)
     {
         if (i == local->index) continue;
-        if (!g_trackInfo[i].alive)    continue;
+        if (!g_trackInfo[i].alive)         continue;
         if (!g_trackInfo[i].seenThisFrame) continue;
 
-        // FoV gate: skip players behind us unless debug_track_360 is set
+        // FoV gate: skip players behind us unless debug_track_360 is set.
         if (!debug_track_360 || debug_track_360->value == 0.0f)
         {
-            // Simple dot-product check against view direction stored by view.cpp.
-            // We use the vector from local origin to entity origin.
-            // (If you want a real FoV cone, replace with a proper dot-product
-            //  against gEngfuncs.GetLocalPlayer()'s view angles forward vector.)
             float dx = g_trackInfo[i].origin[0] - local->origin[0];
             float dy = g_trackInfo[i].origin[1] - local->origin[1];
-            // For simplicity here we accept all — proper FoV gate is in view.cpp
+            // Placeholder — proper FoV dot-product gate lives in view.cpp.
             (void)dx; (void)dy;
         }
 
@@ -114,6 +131,10 @@ int PlayerTrack_FindNearest()
 
 // -------------------------------------------------------
 //  Per-frame logic  (called from HUD_Frame in cdll_int.cpp)
+//
+// IMPORTANT: Do NOT call WorldToScreen() here.
+// pTriAPI->WorldToScreen() is only valid during a render pass.
+// All projection + drawing happens in CHudPlayerTrack::Draw().
 // -------------------------------------------------------
 void PlayerTrack_Frame(double frametime)
 {
@@ -126,7 +147,6 @@ void PlayerTrack_Frame(double frametime)
         // Clear state when disabled so overlay vanishes immediately.
         g_iTrackedEnt = 0;
         g_bMarked     = false;
-        // Reset seenThisFrame for next enable.
         for (int i = 1; i <= MAX_TRACKED_PLAYERS; i++)
             g_trackInfo[i].seenThisFrame = false;
         return;
@@ -177,26 +197,20 @@ void PlayerTrack_Frame(double frametime)
                sizeof(g_trackInfo[g_iTrackedEnt].origin));
     }
 
-    // --- Auto-mark: crosshair within 8 pixels of projected head bone ---
-    if (debug_auto_mark && debug_auto_mark->value != 0.0f && !g_bMarked)
-    {
-        float *hp = g_trackInfo[g_iTrackedEnt].headPos;
-        float sx, sy;
-        if (WorldToScreen(hp, sx, sy))
-        {
-            float cx = g_scrinfo.iWidth  * 0.5f;
-            float cy = g_scrinfo.iHeight * 0.5f;
-            float dx = sx - cx, dy = sy - cy;
-            if (sqrtf(dx*dx + dy*dy) < 8.0f)
-                g_bMarked = true;
-        }
-    }
+    // NOTE: auto-mark crosshair check (WorldToScreen) has been moved into
+    // CHudPlayerTrack::Draw() below, since pTriAPI is only valid there.
 }
 
 // -------------------------------------------------------
 //  CHudPlayerTrack — class implementation
+//
+// FIX #3: The original code had:
+//   DECLARE_MESSAGE(m_PlayerTrack, TrackerInit)
+// at file scope here. DECLARE_MESSAGE expands to a type-declaring macro that
+// registers a server->client network message callback. There is no such message
+// in this system, and placing it at file scope caused the compiler to error on
+// the unknown type names 'm_PlayerTrack' and 'TrackerInit'. It has been removed.
 // -------------------------------------------------------
-DECLARE_MESSAGE(m_PlayerTrack, TrackerInit)   // placeholder, remove if unused
 
 int CHudPlayerTrack::Init()
 {
@@ -262,7 +276,7 @@ int CHudPlayerTrack::Draw(float flTime)
     }
 
     float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
-    bool  any   = false;
+    bool  any  = false;
 
     for (int i = 0; i < 8; i++)
     {
@@ -284,6 +298,23 @@ int CHudPlayerTrack::Draw(float flTime)
     int bw = (int)(maxX - minX);
     int bh = (int)(maxY - minY);
     int cx = bx + bw / 2;
+
+    // --- Auto-mark: crosshair within 8 pixels of projected head bone ---
+    // Moved here from PlayerTrack_Frame() because WorldToScreen requires a
+    // live render context (pTriAPI is only valid during HUD draw).
+    if (debug_auto_mark && debug_auto_mark->value != 0.0f && !g_bMarked)
+    {
+        float *hp = g_trackInfo[g_iTrackedEnt].headPos;
+        float sx, sy;
+        if (WorldToScreen(hp, sx, sy))
+        {
+            float fcx = g_scrinfo.iWidth  * 0.5f;
+            float fcy = g_scrinfo.iHeight * 0.5f;
+            float dx  = sx - fcx, dy = sy - fcy;
+            if (sqrtf(dx*dx + dy*dy) < 8.0f)
+                g_bMarked = true;
+        }
+    }
 
     // ---- visual_box ----
     if (visual_box && visual_box->value != 0.0f)
