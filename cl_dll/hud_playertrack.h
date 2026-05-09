@@ -6,7 +6,7 @@
 *
 ***/
 #pragma once
-#ifndef HUD_PLAYERTRACK_H
+#if !defined(HUD_PLAYERTRACK_H)
 #define HUD_PLAYERTRACK_H
 
 #define MAX_TRACKED_PLAYERS 32
@@ -23,24 +23,24 @@ struct PlayerTrackInfo
 	char  weaponName[64];       // weapon model name without path/.mdl
 };
 
+// Indexed [1..MAX_TRACKED_PLAYERS]. Slot 0 is unused.
 extern PlayerTrackInfo g_trackInfo[MAX_TRACKED_PLAYERS + 1];
 extern int  g_iTrackedEnt;   // currently tracked entity index (0 = none)
 extern bool g_bMarked;        // true when crosshair was on head bone
 
 // CVARs - declared extern so entity.cpp, view.cpp, input.cpp can read them
-extern cvar_t *debug_track_enable;
-extern cvar_t *debug_track_silent;
-extern cvar_t *debug_track_360;
-extern cvar_t *debug_auto_mark;
-extern cvar_t *debug_bone_target;
-extern cvar_t *debug_predict;
-extern cvar_t *visual_box;
-extern cvar_t *visual_name;
-extern cvar_t *visual_weapon;
-extern cvar_t *visual_marker;
+extern cvar_t *debug_track_enable;  // master on/off switch
+extern cvar_t *debug_track_silent;  // 1 = server sees aim angles, screen doesn't snap
+extern cvar_t *debug_track_360;     // 1 = track regardless of facing direction
+extern cvar_t *debug_auto_mark;     // 1 = auto-set MARKED when crosshair on head
+extern cvar_t *debug_bone_target;   // bone index used as "head" (default 7)
+extern cvar_t *debug_predict;       // 1 = extrapolate with velocity
+extern cvar_t *visual_box;          // 1 = draw ESP bounding box
+extern cvar_t *visual_name;         // 1 = draw player name above box
+extern cvar_t *visual_weapon;       // 1 = draw weapon name below box
+extern cvar_t *visual_marker;       // 1 = draw "MARKED" text
 
-// Forward-declare the class so hud.h can use it.
-// The CHudBase base class is defined before hud.h includes this file.
+// Class declaration - must be included AFTER CHudBase is defined (hud.h handles this)
 class CHudPlayerTrack : public CHudBase
 {
 public:
