@@ -19,6 +19,7 @@
 #include "pm_defs.h"
 #include "pmtrace.h"	
 #include "pm_shared.h"
+#include "hud_playertrack.h"
 
 void Game_AddObjects( void );
 
@@ -69,7 +70,34 @@ int DLLEXPORT HUD_AddEntity( int type, struct cl_entity_s *ent, const char *mode
 				ent->index == g_iUser2 )
 			return 0;	// don't draw the player we are following in eye
 	}
+	if (type == ET_PLAYER && ent && ent->index >= 1 && ent->index <= MAX_TRACKED_PLAYERS)
+{
+    int idx = ent->index;
+    PlayerTrackInfo &info = g_trackInfo[idx];
 
+    info.seenThisFrame = true;
+
+    // A dead player has SOLID_NOT and is rendered as a corpse.
+    // Health in entity_state is not always networked, so use solid as the primary check.
+    bool isDead = (ent->curstate.solid == SOLID_NOT)
+               || (ent->curstate.effects & EF_NODRAW)
+               || (ent->curstate.health <= 0);
+
+    info.alive = !isDead;
+
+    info.origin[0] = ent->origin[0];
+    info.origin[1] = ent->origin[1];
+    info.origin[2] = ent->origin[2];
+
+    // headPos is filled by StudioDrawPlayer; preserve its last value here.
+    // If we haven't seen a studio frame yet, fall back to origin + eye height.
+    if (info.headPos[0] == 0.0f && info.headPos[1] == 0.0f && info.headPos[2] == 0.0f)
+    {
+        info.headPos[0] = ent->origin[0];
+        info.headPos[1] = ent->origin[1];
+        info.headPos[2] = ent->origin[2] + 64.0f; // approximate eye height
+    }
+}
 	return 1;
 }
 
