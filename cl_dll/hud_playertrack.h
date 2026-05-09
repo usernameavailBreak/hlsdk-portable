@@ -7,6 +7,7 @@
 #ifndef HUD_PLAYERTRACK_H
 #define HUD_PLAYERTRACK_H
 
+#include "cvardef.h"
 #define MAX_TRACKED_PLAYERS 32
 
 // Per-player state filled by multiple subsystems each frame.
