@@ -30,7 +30,6 @@
 #include "cl_dll.h"
 #include "ammo.h"
 #include "cvardef.h"
-#include "hud_playertrack.h"
 
 #define DHN_DRAWZERO 1
 #define DHN_2DIGITS  2
@@ -91,6 +90,9 @@ struct HUDLIST
 	CHudBase	*p;
 	HUDLIST		*pNext;
 };
+
+// Player tracker — included here so CHudBase is already defined above
+#include "hud_playertrack.h"
 
 //
 //-----------------------------------------------------
