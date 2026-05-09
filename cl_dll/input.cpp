@@ -15,6 +15,8 @@
 #include "hud.h"
 #include "cl_util.h"
 #include "camera.h"
+#include "hud_playertrack.h"
+#include <math.h>
 extern "C"
 {
 #include "kbutton.h"
@@ -902,6 +904,29 @@ void DLLEXPORT CL_CreateMove( float frametime, struct usercmd_s *cmd, int active
 	{
 		VectorCopy( oldangles, cmd->viewangles );
 	}
+
+	// --- player tracker: write aim angles into usercmd so server always sees them ---
+	// Both silent and non-silent modes use this path.
+	// Silent = server gets tracker angles, your screen doesn't snap (view.cpp handles that).
+	// Non-silent = server AND screen both point at target.
+	if( debug_track_enable && debug_track_enable->value != 0.0f
+	    && g_iTrackedEnt > 0
+	    && g_iAlive )
+	{
+		cl_entity_t *local = gEngfuncs.GetLocalPlayer();
+		if( local )
+		{
+			float *head = g_trackInfo[g_iTrackedEnt].headPos;
+			float dx  = head[0] - local->origin[0];
+			float dy  = head[1] - local->origin[1];
+			float dz  = head[2] - local->origin[2];
+			float len = sqrtf( dx*dx + dy*dy );
+			cmd->viewangles[0] = -atan2f( dz, len ) * ( 180.0f / (float)M_PI );
+			cmd->viewangles[1] =  atan2f( dy, dx  ) * ( 180.0f / (float)M_PI );
+			cmd->viewangles[2] = 0.0f;
+		}
+	}
+	// --- end player tracker ---
 
 }
 
