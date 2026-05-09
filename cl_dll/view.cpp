@@ -7,6 +7,8 @@
 
 // view/refresh setup functions
 
+#include "hud_playertrack.h"
+#include <math.h>
 #include "hud.h"
 #include "cl_util.h"
 #include "cvardef.h"
@@ -402,6 +404,20 @@ typedef struct
 	int CurrentAngle;
 } viewinterp_t;
 
+// Compute Euler angles from `from` to `to` in GoldSrc convention.
+// Pitch: negative = look up (GoldSrc inverts pitch vs. math convention).
+static void CalcAngleTo(const float *from, const float *to, float *out_angles)
+{
+    float dx = to[0] - from[0];
+    float dy = to[1] - from[1];
+    float dz = to[2] - from[2];
+    float xyDist = sqrtf(dx*dx + dy*dy);
+
+    out_angles[0] = -atan2f(dz, xyDist) * (180.0f / M_PI); // pitch (negative = up)
+    out_angles[1] =  atan2f(dy, dx)     * (180.0f / M_PI); // yaw
+    out_angles[2] =  0.0f;                                  // roll
+}
+
 /*
 ==================
 V_CalcRefdef
@@ -410,6 +426,44 @@ V_CalcRefdef
 */
 void V_CalcNormalRefdef( struct ref_params_s *pparams )
 {
+	static float s_realViewAngles[3] = {0, 0, 0};
+
+if (debug_track_enable && debug_track_enable->value != 0.0f && g_iTrackedEnt > 0)
+{
+    float *headPos = g_trackInfo[g_iTrackedEnt].headPos;
+    float  aimAngles[3];
+
+    CalcAngleTo(pparams->simorg, headPos, aimAngles);
+
+    if (debug_track_silent && debug_track_silent->value != 0.0f)
+    {
+        // SILENT: save the real render angles, then restore after the
+        // engine has consumed the overridden angles for the usercmd.
+        // The override itself is done in HUD_CreateMove (input.cpp).
+        // Here we just make sure the render stays at the real look direction.
+        pparams->viewangles[0] = s_realViewAngles[0];
+        pparams->viewangles[1] = s_realViewAngles[1];
+        pparams->viewangles[2] = s_realViewAngles[2];
+    }
+    else
+    {
+        // NON-SILENT: snap camera to target head on screen.
+        s_realViewAngles[0] = pparams->viewangles[0];
+        s_realViewAngles[1] = pparams->viewangles[1];
+        s_realViewAngles[2] = pparams->viewangles[2];
+
+        pparams->viewangles[0] = aimAngles[0];
+        pparams->viewangles[1] = aimAngles[1];
+        pparams->viewangles[2] = 0.0f;
+    }
+}
+else
+{
+    // Tracking off — keep real angles updated so silent mode resumes correctly.
+    s_realViewAngles[0] = pparams->viewangles[0];
+    s_realViewAngles[1] = pparams->viewangles[1];
+    s_realViewAngles[2] = pparams->viewangles[2];
+}
 	cl_entity_t *ent, *view;
 	int i;
 	vec3_t angles;
