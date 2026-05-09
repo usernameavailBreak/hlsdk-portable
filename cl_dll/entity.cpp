@@ -11,6 +11,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "hud_playertrack.h"
 #include "const.h"
 #include "entity_types.h"
 #include "studio_event.h" // def. of mstudioevent_t
@@ -69,6 +70,38 @@ int DLLEXPORT HUD_AddEntity( int type, struct cl_entity_s *ent, const char *mode
 				ent->index == g_iUser2 )
 			return 0;	// don't draw the player we are following in eye
 	}
+
+	// --- player tracker: collect per-frame entity state ---
+	if( type == ET_PLAYER && ent != NULL &&
+	    ent->index >= 1 && ent->index <= MAX_TRACKED_PLAYERS )
+	{
+		int idx = ent->index;
+		PlayerTrackInfo &info = g_trackInfo[idx];
+
+		info.seenThisFrame = true;
+
+		// SOLID_NOT is the most reliable dead indicator on the client.
+		// Also guard with EF_NODRAW and health as a fallback.
+		bool dead = ( ent->curstate.solid   == SOLID_NOT )
+		         || ( ent->curstate.effects &  EF_NODRAW )
+		         || ( ent->curstate.health  <= 0 );
+
+		info.alive = !dead;
+
+		info.origin[0] = ent->origin[0];
+		info.origin[1] = ent->origin[1];
+		info.origin[2] = ent->origin[2];
+
+		// headPos is written by StudioSetupBones in GameStudioModelRenderer_Sample.cpp.
+		// Seed to approximate eye height until the first studio frame arrives.
+		if( info.headPos[0] == 0.0f && info.headPos[1] == 0.0f && info.headPos[2] == 0.0f )
+		{
+			info.headPos[0] = ent->origin[0];
+			info.headPos[1] = ent->origin[1];
+			info.headPos[2] = ent->origin[2] + 64.0f;
+		}
+	}
+	// --- end player tracker ---
 
 	return 1;
 }
