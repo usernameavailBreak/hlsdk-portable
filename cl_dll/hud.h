@@ -30,6 +30,7 @@
 #include "cl_dll.h"
 #include "ammo.h"
 #include "cvardef.h"
+#include "hud_playertrack.h"
 
 #define DHN_DRAWZERO 1
 #define DHN_2DIGITS  2
@@ -614,6 +615,7 @@ public:
 	CHudAmmoSecondary	m_AmmoSecondary;
 	CHudTextMessage m_TextMessage;
 	CHudStatusIcons m_StatusIcons;
+	CHudPlayerTrack m_PlayerTrack;
 #if !USE_VGUI || USE_NOVGUI_SCOREBOARD
 	CHudScoreboard	m_Scoreboard;
 #endif
