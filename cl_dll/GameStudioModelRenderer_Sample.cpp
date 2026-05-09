@@ -8,6 +8,7 @@
 #include <assert.h>
 #include "hud.h"
 #include "cl_util.h"
+#include "hud_playertrack.h"
 #include "const.h"
 #include "com_model.h"
 #include "studio.h"
@@ -778,6 +779,42 @@ int CGameStudioModelRenderer::_StudioDrawPlayer( int flags, entity_state_t *ppla
 	m_pPlayerInfo = IEngineStudio.PlayerInfo( m_nPlayerIndex );
 	StudioSetupBones( );
 	StudioSaveBones( );
+
+	// --- player tracker: capture head bone world position and weapon name ---
+	if( debug_track_enable && debug_track_enable->value != 0.0f )
+	{
+		int entIdx = m_pCurrentEntity->index;
+		if( entIdx >= 1 && entIdx <= MAX_TRACKED_PLAYERS && m_pbonetransform )
+		{
+			// debug_bone_target holds the bone index (default 7 = head on standard HL skeleton).
+			// Each m_pbonetransform[i] is a 3x4 matrix; column [n][3] is world-space translation.
+			int boneIdx = debug_bone_target ? (int)debug_bone_target->value : 7;
+			if( boneIdx >= 0 && boneIdx < m_pStudioHeader->numbones )
+			{
+				g_trackInfo[entIdx].headPos[0] = (*m_pbonetransform)[boneIdx][0][3];
+				g_trackInfo[entIdx].headPos[1] = (*m_pbonetransform)[boneIdx][1][3];
+				g_trackInfo[entIdx].headPos[2] = (*m_pbonetransform)[boneIdx][2][3];
+			}
+
+			// Grab weapon model name from the entity state
+			if( pplayer->weaponmodel > 0 )
+			{
+				model_t *wpnMdl = IEngineStudio.GetModelByIndex( pplayer->weaponmodel );
+				if( wpnMdl && wpnMdl->name[0] )
+				{
+					const char *slash = strrchr( wpnMdl->name, '/' );
+					if( !slash ) slash = strrchr( wpnMdl->name, '\\' );
+					const char *base  = slash ? slash + 1 : wpnMdl->name;
+					strncpy( g_trackInfo[entIdx].weaponName, base, 63 );
+					g_trackInfo[entIdx].weaponName[63] = '\0';
+					char *dot = strrchr( g_trackInfo[entIdx].weaponName, '.' );
+					if( dot ) *dot = '\0';
+				}
+			}
+		}
+	}
+	// --- end player tracker ---
+
 	m_pPlayerInfo->renderframe = m_nFrameCount;
 
 	m_pPlayerInfo = NULL;
