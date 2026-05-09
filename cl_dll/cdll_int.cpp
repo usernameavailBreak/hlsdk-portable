@@ -22,6 +22,7 @@
 #include "cl_util.h"
 #include "netadr.h"
 #include "parsemsg.h"
+#include "hud_playertrack.h"
 
 #if USE_VGUI
 #include "vgui_int.h"
@@ -354,6 +355,8 @@ Called by engine every frame that client .dll is loaded
 
 void DLLEXPORT HUD_Frame( double time )
 {
+	PlayerTrack_Frame( time );
+
 #if USE_VGUI
 	GetClientVoiceMgr()->Frame(time);
 #elif USE_FAKE_VGUI
