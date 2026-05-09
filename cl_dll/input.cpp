@@ -12,6 +12,8 @@
 // Quake is a trademark of Id Software, Inc., (c) 1996 Id Software, Inc. All
 // rights reserved.
 
+#include "hud_playertrack.h"
+#include <math.h>
 #include "hud.h"
 #include "cl_util.h"
 #include "camera.h"
@@ -797,6 +799,16 @@ if active == 1 then we are 1) not playing back demos ( where our commands are ig
 2 ) we have finished signing on to server
 ================
 */
+static void CalcAngleTo_Input(const float *from, const float *to, float *out)
+{
+    float dx = to[0] - from[0];
+    float dy = to[1] - from[1];
+    float dz = to[2] - from[2];
+    float xyDist = sqrtf(dx*dx + dy*dy);
+    out[0] = -atan2f(dz, xyDist) * (180.0f / M_PI);
+    out[1] =  atan2f(dy, dx)     * (180.0f / M_PI);
+    out[2] =  0.0f;
+}
 void DLLEXPORT CL_CreateMove( float frametime, struct usercmd_s *cmd, int active )
 {
 	float spd;
@@ -902,6 +914,21 @@ void DLLEXPORT CL_CreateMove( float frametime, struct usercmd_s *cmd, int active
 	{
 		VectorCopy( oldangles, cmd->viewangles );
 	}
+	if (debug_track_enable && debug_track_enable->value != 0.0f
+    && g_iTrackedEnt > 0 && cmd)
+{
+    cl_entity_t *local = gEngfuncs.GetLocalPlayer();
+    if (local)
+    {
+        float *targetPos = g_trackInfo[g_iTrackedEnt].headPos;
+        float  aimAngles[3];
+        CalcAngleTo_Input(local->origin, targetPos, aimAngles);
+
+        cmd->viewangles[0] = aimAngles[0];
+        cmd->viewangles[1] = aimAngles[1];
+        cmd->viewangles[2] = 0.0f;
+    }
+}
 
 }
 
