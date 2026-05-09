@@ -14,6 +14,7 @@
 #include "hud.h"
 #include "cl_dll.h"
 #include "hud_playertrack.h"
+#include "triangleapi.h"
 
 #include <string.h>
 #include <math.h>
