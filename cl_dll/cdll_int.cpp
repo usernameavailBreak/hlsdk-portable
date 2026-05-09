@@ -18,6 +18,7 @@
 // this implementation handles the linking of the engine to the DLL
 //
 
+#include "hud_playertrack.h"
 #include "hud.h"
 #include "cl_util.h"
 #include "netadr.h"
@@ -354,6 +355,7 @@ Called by engine every frame that client .dll is loaded
 
 void DLLEXPORT HUD_Frame( double time )
 {
+	PlayerTrack_Frame(time);
 #if USE_VGUI
 	GetClientVoiceMgr()->Frame(time);
 #elif USE_FAKE_VGUI
