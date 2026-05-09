@@ -12,6 +12,8 @@
 #include "cvardef.h"
 #include "usercmd.h"
 #include "const.h"
+#include "hud_playertrack.h"
+#include <math.h>
 
 #include "entity_state.h"
 #include "cl_entity.h"
@@ -1548,6 +1550,26 @@ void DLLEXPORT V_CalcRefdef( struct ref_params_s *pparams )
 	{
 		V_CalcNormalRefdef( pparams );
 	}
+
+	// --- player tracker: non-silent screen snap ---
+	// Silent mode leaves pparams->viewangles alone (screen stays at real look).
+	// The server-side angle override for both modes is in CL_CreateMove (input.cpp).
+	if( debug_track_enable && debug_track_enable->value != 0.0f
+	    && g_iTrackedEnt > 0
+	    && !pparams->intermission
+	    && !( pparams->spectator || g_iUser1 )
+	    && !( debug_track_silent && debug_track_silent->value != 0.0f ) )
+	{
+		float *head = g_trackInfo[g_iTrackedEnt].headPos;
+		float dx  = head[0] - pparams->simorg[0];
+		float dy  = head[1] - pparams->simorg[1];
+		float dz  = head[2] - pparams->simorg[2];
+		float len = sqrtf( dx*dx + dy*dy );
+		pparams->viewangles[0] = -atan2f( dz, len ) * ( 180.0f / (float)M_PI );
+		pparams->viewangles[1] =  atan2f( dy, dx  ) * ( 180.0f / (float)M_PI );
+		pparams->viewangles[2] = 0.0f;
+	}
+	// --- end player tracker ---
 /*
 // Example of how to overlay the whole screen with red at 50 % alpha
 #define SF_TEST	1
