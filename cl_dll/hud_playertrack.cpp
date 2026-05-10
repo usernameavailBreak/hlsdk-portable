@@ -10,6 +10,7 @@
 #include "hud.h"
 #include "cl_util.h"
 #include "hud_playertrack.h"
+#include "ref_params.h"
 
 #include <string.h>
 #include <math.h>
