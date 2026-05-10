@@ -9,7 +9,9 @@
 #if !defined(HUD_PLAYERTRACK_H)
 #define HUD_PLAYERTRACK_H
 
-#include "ref_params.h"   // for ref_params_s
+// ref_params_s is defined in ref_params.h which is pulled in via hud.h -> cdll_int.h chain.
+// Forward-declare here so the extern below compiles in any include order.
+struct ref_params_s;
 
 #define MAX_TRACKED_PLAYERS 32
 
@@ -32,7 +34,7 @@ extern bool g_bMarked;        // true when crosshair was on head bone
 
 // Snapshot of ref_params written at the start of every V_CalcRefdef call.
 // Used for manual world-to-screen projection (Xash3D has no pfnWorldToScreen).
-extern ref_params_t g_refParams;
+extern struct ref_params_s g_refParams;
 
 // CVARs
 extern cvar_t *debug_track_enable;
