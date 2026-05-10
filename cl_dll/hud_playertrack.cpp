@@ -25,7 +25,7 @@ bool g_bMarked     = false;
 // Snapshot of ref_params from the last V_CalcRefdef call.
 // Written by view.cpp. Used here for manual world-to-screen projection
 // because Xash3D's cl_enginefuncs_s does not expose pfnWorldToScreen.
-ref_params_t g_refParams;
+struct ref_params_s g_refParams;
 
 //--------------------------------------------------
 // CVARs
@@ -64,70 +64,40 @@ static inline float Dot3( const float *a, const float *b )
 }
 
 //--------------------------------------------------
-// Helper: build forward/right/up from GoldSrc Euler angles.
-// Angles are [PITCH, YAW, ROLL] in degrees.
-// Pitch positive = look down, yaw positive = turn left (GoldSrc convention).
-//--------------------------------------------------
-static void AngleVectorsLocal( const float *angles,
-                               float *forward, float *right, float *up )
-{
-	float sp = sinf( angles[0] * (float)(M_PI / 180.0) );
-	float cp = cosf( angles[0] * (float)(M_PI / 180.0) );
-	float sy = sinf( angles[1] * (float)(M_PI / 180.0) );
-	float cy = cosf( angles[1] * (float)(M_PI / 180.0) );
-	float sr = sinf( angles[2] * (float)(M_PI / 180.0) );
-	float cr = cosf( angles[2] * (float)(M_PI / 180.0) );
-
-	if( forward )
-	{
-		forward[0] =  cp * cy;
-		forward[1] =  cp * sy;
-		forward[2] = -sp;
-	}
-	if( right )
-	{
-		right[0] = -sr * sp * cy + -cr * -sy;
-		right[1] = -sr * sp * sy + -cr *  cy;
-		right[2] = -sr * cp;
-	}
-	if( up )
-	{
-		up[0] =  cr * sp * cy + -sr * -sy;
-		up[1] =  cr * sp * sy + -sr *  cy;
-		up[2] =  cr * cp;
-	}
-}
-
-//--------------------------------------------------
 // Helper: manual world-to-screen projection.
-// Uses the ref_params snapshot stored by view.cpp each frame.
+// Uses precomputed forward/right/up from g_refParams
+// (written by view.cpp at the start of V_CalcRefdef).
 // Returns true if the point is in front of the camera.
-// Fills sx/sy with pixel coordinates.
 //--------------------------------------------------
 static bool WorldToScreen( const float *world, float &sx, float &sy )
 {
-	// Need a valid ref_params snapshot (view origin, view angles, fov).
-	// g_refParams is written at the top of V_CalcRefdef every frame.
-	float forward[3], right[3], up[3];
-	AngleVectorsLocal( g_refParams.viewangles, forward, right, up );
+	// Bail early if g_refParams hasn't been populated yet (fov_x = 0 on startup)
+	if( g_refParams.fov_x <= 0.0f )
+		return false;
 
 	float delta[3];
 	delta[0] = world[0] - g_refParams.vieworg[0];
 	delta[1] = world[1] - g_refParams.vieworg[1];
 	delta[2] = world[2] - g_refParams.vieworg[2];
 
-	float fwd = Dot3( delta, forward );
+	// ref_params_s has precomputed forward/right/up - use them directly
+	float fwd = Dot3( delta, g_refParams.forward );
 	if( fwd <= 0.01f ) return false; // point is behind the camera
 
-	float rgt = Dot3( delta, right );
-	float upv = Dot3( delta, up );
+	float rgt = Dot3( delta, g_refParams.right );
+	float upv = Dot3( delta, g_refParams.up );
 
 	float w = (float)g_scrinfo.iWidth;
 	float h = (float)g_scrinfo.iHeight;
 
-	// Half-widths in world units at unit depth
 	float halfW = tanf( g_refParams.fov_x * 0.5f * (float)(M_PI / 180.0) );
-	float halfH = tanf( g_refParams.fov_y * 0.5f * (float)(M_PI / 180.0) );
+
+	// fov_y may be 0 in some engine states; derive it from fov_x and aspect ratio
+	float fov_y = g_refParams.fov_y;
+	if( fov_y <= 0.0f )
+		fov_y = 2.0f * atan2f( tanf( g_refParams.fov_x * 0.5f * (float)(M_PI / 180.0) ) * h, w ) * (float)(180.0 / M_PI);
+
+	float halfH = tanf( fov_y * 0.5f * (float)(M_PI / 180.0) );
 
 	sx = ( w * 0.5f ) + ( rgt / fwd ) * ( w * 0.5f ) / halfW;
 	sy = ( h * 0.5f ) - ( upv / fwd ) * ( h * 0.5f ) / halfH;
