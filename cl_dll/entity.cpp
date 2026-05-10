@@ -80,11 +80,11 @@ int DLLEXPORT HUD_AddEntity( int type, struct cl_entity_s *ent, const char *mode
 
 		info.seenThisFrame = true;
 
-		// SOLID_NOT is the most reliable dead indicator on the client.
-		// Also guard with EF_NODRAW and health as a fallback.
-		bool dead = ( ent->curstate.solid   == SOLID_NOT )
-		         || ( ent->curstate.effects &  EF_NODRAW )
-		         || ( ent->curstate.health  <= 0 );
+		// SOLID_NOT is the correct dead indicator for remote players.
+		// Do NOT check curstate.health - it is not networked for remote players
+		// and is 0 for all of them, which would incorrectly mark everyone as dead.
+		bool dead = ( ent->curstate.solid  == SOLID_NOT )
+		         || ( ent->curstate.effects &  EF_NODRAW );
 
 		info.alive = !dead;
 
