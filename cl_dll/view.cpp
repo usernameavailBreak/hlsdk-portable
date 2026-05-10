@@ -1537,6 +1537,10 @@ void V_CalcSpectatorRefdef( struct ref_params_s * pparams )
 
 void DLLEXPORT V_CalcRefdef( struct ref_params_s *pparams )
 {
+	// Store a copy every frame so hud_playertrack.cpp can use it for
+	// manual world-to-screen projection (Xash3D has no pfnWorldToScreen).
+	g_refParams = *pparams;
+
 	// intermission / finale rendering
 	if( pparams->intermission )
 	{
