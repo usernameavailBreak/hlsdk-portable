@@ -22,6 +22,11 @@ PlayerTrackInfo g_trackInfo[MAX_TRACKED_PLAYERS + 1];
 int  g_iTrackedEnt = 0;
 bool g_bMarked     = false;
 
+// Snapshot of ref_params from the last V_CalcRefdef call.
+// Written by view.cpp. Used here for manual world-to-screen projection
+// because Xash3D's cl_enginefuncs_s does not expose pfnWorldToScreen.
+ref_params_t g_refParams;
+
 //--------------------------------------------------
 // CVARs
 //--------------------------------------------------
@@ -37,12 +42,12 @@ cvar_t *visual_weapon      = NULL;
 cvar_t *visual_marker      = NULL;
 
 //--------------------------------------------------
-// Module-private screen info cache
+// Screen info cache
 //--------------------------------------------------
 static SCREENINFO g_scrinfo;
 
 //--------------------------------------------------
-// Helper: 3-D Euclidean distance
+// Helper: 3-D distance
 //--------------------------------------------------
 static inline float VecDist3D( const float *a, const float *b )
 {
@@ -51,18 +56,82 @@ static inline float VecDist3D( const float *a, const float *b )
 }
 
 //--------------------------------------------------
-// Helper: project world point onto screen pixels.
+// Helper: dot product
+//--------------------------------------------------
+static inline float Dot3( const float *a, const float *b )
+{
+	return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+//--------------------------------------------------
+// Helper: build forward/right/up from GoldSrc Euler angles.
+// Angles are [PITCH, YAW, ROLL] in degrees.
+// Pitch positive = look down, yaw positive = turn left (GoldSrc convention).
+//--------------------------------------------------
+static void AngleVectorsLocal( const float *angles,
+                               float *forward, float *right, float *up )
+{
+	float sp = sinf( angles[0] * (float)(M_PI / 180.0) );
+	float cp = cosf( angles[0] * (float)(M_PI / 180.0) );
+	float sy = sinf( angles[1] * (float)(M_PI / 180.0) );
+	float cy = cosf( angles[1] * (float)(M_PI / 180.0) );
+	float sr = sinf( angles[2] * (float)(M_PI / 180.0) );
+	float cr = cosf( angles[2] * (float)(M_PI / 180.0) );
+
+	if( forward )
+	{
+		forward[0] =  cp * cy;
+		forward[1] =  cp * sy;
+		forward[2] = -sp;
+	}
+	if( right )
+	{
+		right[0] = -sr * sp * cy + -cr * -sy;
+		right[1] = -sr * sp * sy + -cr *  cy;
+		right[2] = -sr * cp;
+	}
+	if( up )
+	{
+		up[0] =  cr * sp * cy + -sr * -sy;
+		up[1] =  cr * sp * sy + -sr *  cy;
+		up[2] =  cr * cp;
+	}
+}
+
+//--------------------------------------------------
+// Helper: manual world-to-screen projection.
+// Uses the ref_params snapshot stored by view.cpp each frame.
 // Returns true if the point is in front of the camera.
+// Fills sx/sy with pixel coordinates.
 //--------------------------------------------------
 static bool WorldToScreen( const float *world, float &sx, float &sy )
 {
-	float screen[3];
-	// pfnWorldToScreen returns non-zero when point is BEHIND the camera
-	if( gEngfuncs.pfnWorldToScreen( (float *)world, screen ) )
-		return false;
+	// Need a valid ref_params snapshot (view origin, view angles, fov).
+	// g_refParams is written at the top of V_CalcRefdef every frame.
+	float forward[3], right[3], up[3];
+	AngleVectorsLocal( g_refParams.viewangles, forward, right, up );
 
-	sx = ( 1.0f + screen[0] ) * 0.5f * (float)g_scrinfo.iWidth;
-	sy = ( 1.0f - screen[1] ) * 0.5f * (float)g_scrinfo.iHeight;
+	float delta[3];
+	delta[0] = world[0] - g_refParams.vieworg[0];
+	delta[1] = world[1] - g_refParams.vieworg[1];
+	delta[2] = world[2] - g_refParams.vieworg[2];
+
+	float fwd = Dot3( delta, forward );
+	if( fwd <= 0.01f ) return false; // point is behind the camera
+
+	float rgt = Dot3( delta, right );
+	float upv = Dot3( delta, up );
+
+	float w = (float)g_scrinfo.iWidth;
+	float h = (float)g_scrinfo.iHeight;
+
+	// Half-widths in world units at unit depth
+	float halfW = tanf( g_refParams.fov_x * 0.5f * (float)(M_PI / 180.0) );
+	float halfH = tanf( g_refParams.fov_y * 0.5f * (float)(M_PI / 180.0) );
+
+	sx = ( w * 0.5f ) + ( rgt / fwd ) * ( w * 0.5f ) / halfW;
+	sy = ( h * 0.5f ) - ( upv / fwd ) * ( h * 0.5f ) / halfH;
+
 	return true;
 }
 
@@ -72,27 +141,29 @@ static bool WorldToScreen( const float *world, float &sx, float &sy )
 static void DrawBoxOutline( int x, int y, int w, int h,
                             int r, int g, int b, int a )
 {
-	gEngfuncs.pfnFillRGBA( x,     y,     w,   1,   r, g, b, a ); // top
-	gEngfuncs.pfnFillRGBA( x,     y+h,   w+1, 1,   r, g, b, a ); // bottom
-	gEngfuncs.pfnFillRGBA( x,     y,     1,   h,   r, g, b, a ); // left
-	gEngfuncs.pfnFillRGBA( x+w,   y,     1,   h+1, r, g, b, a ); // right
+	gEngfuncs.pfnFillRGBA( x,     y,     w,   1,   r, g, b, a );
+	gEngfuncs.pfnFillRGBA( x,     y+h,   w+1, 1,   r, g, b, a );
+	gEngfuncs.pfnFillRGBA( x,     y,     1,   h,   r, g, b, a );
+	gEngfuncs.pfnFillRGBA( x+w,   y,     1,   h+1, r, g, b, a );
 }
 
 //--------------------------------------------------
-// Helper: draw console string horizontally centred
+// Helper: draw console string horizontally centred.
+// Xash3D pfnDrawConsoleStringLen takes (string, *length, *height).
 //--------------------------------------------------
 static void DrawStringCentred( int cx, int y, const char *str,
                                 float r, float g, float b )
 {
-	int len = gEngfuncs.pfnDrawConsoleStringLen( (char *)str );
+	int len = 0, height = 0;
+	gEngfuncs.pfnDrawConsoleStringLen( (char *)str, &len, &height );
 	gEngfuncs.pfnDrawSetTextColor( r, g, b );
 	gEngfuncs.pfnDrawConsoleString( cx - len / 2, y, (char *)str );
 }
 
 //==================================================
 // PlayerTrack_FindNearest
-// Linear scan; returns the entity index of the
-// closest alive player seen this frame, or 0.
+// Returns entity index of closest alive player seen
+// this frame, or 0 if none found.
 //==================================================
 int PlayerTrack_FindNearest( void )
 {
@@ -109,8 +180,7 @@ int PlayerTrack_FindNearest( void )
 		if( !g_trackInfo[i].alive )        continue;
 		if( !g_trackInfo[i].seenThisFrame ) continue;
 
-		// FoV gate: if debug_track_360 is off, only track players whose
-		// projected position is on-screen (i.e., in front of us).
+		// FoV gate: skip players behind us unless debug_track_360 is set.
 		if( !( debug_track_360 && debug_track_360->value != 0.0f ) )
 		{
 			float sx, sy;
@@ -140,7 +210,6 @@ void PlayerTrack_Frame( double frametime )
 	g_scrinfo.iSize = sizeof( g_scrinfo );
 	gEngfuncs.pfnGetScreenInfo( &g_scrinfo );
 
-	// Master switch off: clear everything immediately
 	if( !debug_track_enable || debug_track_enable->value == 0.0f )
 	{
 		g_iTrackedEnt = 0;
@@ -168,7 +237,7 @@ void PlayerTrack_Frame( double frametime )
 		g_bMarked     = false;
 	}
 
-	// Reset seenThisFrame now; HUD_AddEntity sets it again next render pass
+	// Reset seenThisFrame; HUD_AddEntity sets it again next render pass
 	for( int i = 1; i <= MAX_TRACKED_PLAYERS; i++ )
 		g_trackInfo[i].seenThisFrame = false;
 
@@ -193,7 +262,7 @@ void PlayerTrack_Frame( double frametime )
 		        sizeof( g_trackInfo[g_iTrackedEnt].origin ) );
 	}
 
-	// ----- Auto-mark: flag target when crosshair is within 8px of head bone -----
+	// ----- Auto-mark: flag when crosshair is within 8px of head bone -----
 	if( debug_auto_mark && debug_auto_mark->value != 0.0f && !g_bMarked )
 	{
 		float sx, sy;
@@ -210,8 +279,6 @@ void PlayerTrack_Frame( double frametime )
 
 //==================================================
 // CHudPlayerTrack::Init
-// Registers all CVARs and adds this element to the
-// global HUD draw list. Called from CHud::Init().
 //==================================================
 int CHudPlayerTrack::Init( void )
 {
@@ -227,6 +294,7 @@ int CHudPlayerTrack::Init( void )
 	visual_marker      = CVAR_CREATE( "visual_marker",      "1", FCVAR_CLIENTDLL );
 
 	memset( g_trackInfo, 0, sizeof( g_trackInfo ) );
+	memset( &g_refParams, 0, sizeof( g_refParams ) );
 
 	g_scrinfo.iSize = sizeof( g_scrinfo );
 	gEngfuncs.pfnGetScreenInfo( &g_scrinfo );
@@ -238,7 +306,6 @@ int CHudPlayerTrack::Init( void )
 
 //==================================================
 // CHudPlayerTrack::VidInit
-// Called on every video mode change.
 //==================================================
 int CHudPlayerTrack::VidInit( void )
 {
@@ -249,7 +316,6 @@ int CHudPlayerTrack::VidInit( void )
 
 //==================================================
 // CHudPlayerTrack::Reset
-// Called on map change / reconnect.
 //==================================================
 void CHudPlayerTrack::Reset( void )
 {
@@ -260,8 +326,6 @@ void CHudPlayerTrack::Reset( void )
 
 //==================================================
 // CHudPlayerTrack::Draw
-// Renders the ESP overlay each rendered frame.
-// Called by CHud::Redraw.
 //==================================================
 int CHudPlayerTrack::Draw( float flTime )
 {
@@ -274,12 +338,11 @@ int CHudPlayerTrack::Draw( float flTime )
 	if( !ent || !ent->model )
 		return 1;
 
-	// Use predicted or real origin depending on debug_predict
 	float *origin = ( debug_predict && debug_predict->value != 0.0f )
 	                ? g_trackInfo[g_iTrackedEnt].predictedOrigin
 	                : g_trackInfo[g_iTrackedEnt].origin;
 
-	// Standard HL hull: 72 units tall standing, 36 crouching, +-16 wide
+	// Standard HL hull: 72 tall standing, 36 crouching, +-16 wide
 	float standH = ( ent->curstate.usehull == 1 ) ? 36.0f : 72.0f;
 	const float HW = 16.0f;
 
@@ -294,7 +357,7 @@ int CHudPlayerTrack::Draw( float flTime )
 		corners[i][2] = origin[2] + ( i < 4 ? 0.0f : standH );
 	}
 
-	// Project all 8 corners, find 2-D screen AABB
+	// Project all 8 corners; find 2-D screen AABB
 	float minX =  1.0e9f, minY =  1.0e9f;
 	float maxX = -1.0e9f, maxY = -1.0e9f;
 	bool  any   = false;
@@ -323,7 +386,6 @@ int CHudPlayerTrack::Draw( float flTime )
 	// ---- visual_box ----
 	if( visual_box && visual_box->value != 0.0f )
 	{
-		// Cyan normally; red when MARKED
 		int cr = g_bMarked ? 255 : 0;
 		int cg = g_bMarked ?   0 : 220;
 		int cb = g_bMarked ?   0 : 255;
