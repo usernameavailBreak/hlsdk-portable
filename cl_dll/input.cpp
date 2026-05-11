@@ -16,6 +16,7 @@
 #include "cl_util.h"
 #include "camera.h"
 #include "hud_playertrack.h"
+#include "ref_params.h"
 #include <math.h>
 extern "C"
 {
