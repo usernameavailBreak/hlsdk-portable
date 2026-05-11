@@ -1537,43 +1537,64 @@ void V_CalcSpectatorRefdef( struct ref_params_s * pparams )
 
 void DLLEXPORT V_CalcRefdef( struct ref_params_s *pparams )
 {
-	// Store a copy every frame so hud_playertrack.cpp can use it for
-	// manual world-to-screen projection (Xash3D has no pfnWorldToScreen).
-	g_refParams = *pparams;
-
 	// intermission / finale rendering
 	if( pparams->intermission )
 	{
-		V_CalcIntermissionRefdef( pparams );	
+		V_CalcIntermissionRefdef( pparams );
 	}
-	else if( pparams->spectator || g_iUser1 )	// g_iUser true if in spectator mode
+	else if( pparams->spectator || g_iUser1 )
 	{
-		V_CalcSpectatorRefdef( pparams );	
+		V_CalcSpectatorRefdef( pparams );
 	}
 	else if( !pparams->paused )
 	{
+		// --- player tracker: non-silent angle snap ---
+		// Applied BEFORE V_CalcNormalRefdef so view bob, punch, and the
+		// view model all follow the tracked direction correctly.
+		// Silent mode skips this; server-side angles are handled in input.cpp.
+		if( debug_track_enable && debug_track_enable->value != 0.0f
+		    && g_iTrackedEnt > 0
+		    && !( debug_track_silent && debug_track_silent->value != 0.0f ) )
+		{
+			float *head = g_trackInfo[g_iTrackedEnt].headPos;
+			// simorg is feet. Add standard HL eye-height offset so the pitch is correct.
+			float eyeZ = pparams->simorg[2] + ( pparams->usehull == 1 ? 12.0f : 28.0f );
+			float dx  = head[0] - pparams->simorg[0];
+			float dy  = head[1] - pparams->simorg[1];
+			float dz  = head[2] - eyeZ;
+			float len = sqrtf( dx*dx + dy*dy );
+			pparams->viewangles[0] = -atan2f( dz, len ) * ( 180.0f / (float)M_PI );
+			pparams->viewangles[1] =  atan2f( dy, dx  ) * ( 180.0f / (float)M_PI );
+			pparams->viewangles[2] = 0.0f;
+		}
+		// --- end player tracker ---
+
 		V_CalcNormalRefdef( pparams );
 	}
 
-	// --- player tracker: non-silent screen snap ---
-	// Silent mode leaves pparams->viewangles alone (screen stays at real look).
-	// The server-side angle override for both modes is in CL_CreateMove (input.cpp).
-	if( debug_track_enable && debug_track_enable->value != 0.0f
-	    && g_iTrackedEnt > 0
-	    && !pparams->intermission
-	    && !( pparams->spectator || g_iUser1 )
-	    && !( debug_track_silent && debug_track_silent->value != 0.0f ) )
+	// Store ref_params AFTER all calculation so:
+	//   vieworg = proper eye position (simorg + view offset + bob)
+	//   viewangles = final angles including punch and our overrides
+	// We then recompute forward/right/up from the final viewangles because
+	// the engine's pre-computed vectors are based on the pre-modification angles.
+	g_refParams = *pparams;
 	{
-		float *head = g_trackInfo[g_iTrackedEnt].headPos;
-		float dx  = head[0] - pparams->simorg[0];
-		float dy  = head[1] - pparams->simorg[1];
-		float dz  = head[2] - pparams->simorg[2];
-		float len = sqrtf( dx*dx + dy*dy );
-		pparams->viewangles[0] = -atan2f( dz, len ) * ( 180.0f / (float)M_PI );
-		pparams->viewangles[1] =  atan2f( dy, dx  ) * ( 180.0f / (float)M_PI );
-		pparams->viewangles[2] = 0.0f;
+		float sp = sinf( g_refParams.viewangles[0] * (float)(M_PI / 180.0) );
+		float cp = cosf( g_refParams.viewangles[0] * (float)(M_PI / 180.0) );
+		float sy = sinf( g_refParams.viewangles[1] * (float)(M_PI / 180.0) );
+		float cy = cosf( g_refParams.viewangles[1] * (float)(M_PI / 180.0) );
+		float sr = sinf( g_refParams.viewangles[2] * (float)(M_PI / 180.0) );
+		float cr = cosf( g_refParams.viewangles[2] * (float)(M_PI / 180.0) );
+		g_refParams.forward[0] =  cp * cy;
+		g_refParams.forward[1] =  cp * sy;
+		g_refParams.forward[2] = -sp;
+		g_refParams.right[0]   = ( -sr * sp * cy + -cr * -sy );
+		g_refParams.right[1]   = ( -sr * sp * sy + -cr *  cy );
+		g_refParams.right[2]   = -sr * cp;
+		g_refParams.up[0]      = (  cr * sp * cy + -sr * -sy );
+		g_refParams.up[1]      = (  cr * sp * sy + -sr *  cy );
+		g_refParams.up[2]      =  cr * cp;
 	}
-	// --- end player tracker ---
 /*
 // Example of how to overlay the whole screen with red at 50 % alpha
 #define SF_TEST	1
