@@ -11,6 +11,9 @@
 #include "cl_util.h"
 #include "hud_playertrack.h"
 #include "ref_params.h"
+#include "event_api.h"
+#include "pmtrace.h"
+#include "pm_defs.h"
 
 #include <string.h>
 #include <math.h>
@@ -62,6 +65,31 @@ static inline float VecDist3D( const float *a, const float *b )
 static inline float Dot3( const float *a, const float *b )
 {
 	return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+//--------------------------------------------------
+// Helper: line-of-sight check.
+// Traces from eye position to the target world point
+// using only world geometry (PM_WORLD_ONLY).
+// Returns true if there is nothing blocking the path.
+//--------------------------------------------------
+static bool IsPlayerVisible( const float *toTarget )
+{
+	// Bail if we haven't gotten a valid frame yet
+	if( g_refParams.fov_x <= 0.0f )
+		return false;
+
+	pmtrace_t tr;
+	gEngfuncs.pEventAPI->EV_SetTraceHull( 2 ); // point hull
+	gEngfuncs.pEventAPI->EV_PlayerTrace(
+	    (float *)g_refParams.vieworg,  // from: eye position
+	    (float *)toTarget,             // to: target head bone
+	    PM_WORLD_ONLY,                 // only check world brushes
+	    -1,                            // don't skip any specific player
+	    &tr );
+
+	// If fraction < ~1 something solid is between us and the target
+	return ( tr.fraction >= 0.99f );
 }
 
 //--------------------------------------------------
@@ -162,6 +190,10 @@ int PlayerTrack_FindNearest( void )
 				continue;
 		}
 
+		// Visibility check: skip players with no line of sight
+		if( !IsPlayerVisible( g_trackInfo[i].headPos ) )
+			continue;
+
 		float dist = VecDist3D( local->origin, g_trackInfo[i].origin );
 		if( dist < bestDist )
 		{
@@ -190,11 +222,13 @@ void PlayerTrack_Frame( double frametime )
 		return;
 	}
 
-	// ----- Death / disappearance check -----
+	// ----- Death / disappearance / LOS check -----
 	if( g_iTrackedEnt > 0 )
 	{
-		if( !g_trackInfo[g_iTrackedEnt].alive ||
-		    !g_trackInfo[g_iTrackedEnt].seenThisFrame )
+		bool lost = !g_trackInfo[g_iTrackedEnt].alive
+		         || !g_trackInfo[g_iTrackedEnt].seenThisFrame
+		         || !IsPlayerVisible( g_trackInfo[g_iTrackedEnt].headPos );
+		if( lost )
 		{
 			g_iTrackedEnt = 0;
 			g_bMarked     = false;
