@@ -1557,8 +1557,9 @@ void DLLEXPORT V_CalcRefdef( struct ref_params_s *pparams )
 		    && !( debug_track_silent && debug_track_silent->value != 0.0f ) )
 		{
 			float *head = g_trackInfo[g_iTrackedEnt].headPos;
-			// simorg is feet. Add standard HL eye-height offset so the pitch is correct.
-			float eyeZ = pparams->simorg[2] + ( pparams->usehull == 1 ? 12.0f : 28.0f );
+			// simorg is feet. 28 units is the standard HL standing eye height.
+			// Crouching eye height (12) is close enough at any real engagement distance.
+			float eyeZ = pparams->simorg[2] + 28.0f;
 			float dx  = head[0] - pparams->simorg[0];
 			float dy  = head[1] - pparams->simorg[1];
 			float dz  = head[2] - eyeZ;
